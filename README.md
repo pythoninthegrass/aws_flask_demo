@@ -1,4 +1,4 @@
-# Deploy Python Flask API to AWS Using Open Source Tools
+# aws_flask_demo
 ---
 
 In this post, we will demonstrate how to build and deploy an API running in a microservice architecture. 

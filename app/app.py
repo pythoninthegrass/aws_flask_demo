@@ -1,14 +1,13 @@
-# app.py
-
-import os
+#!/usr/bin/env python
 
 import boto3
-
+import os
 from flask import Flask, jsonify, request
-app = Flask(__name__)
 
+app = Flask(__name__)
 client = boto3.client('dynamodb', region_name='us-east-1')
 dynamoTableName = 'musicTable'
+
 
 @app.route("/")
 def hello():
@@ -55,5 +54,4 @@ def create_artist():
 
 
 if __name__ == '__main__':
-    app.run(threaded=True,host='0.0.0.0',port=5000)
-
+    app.run(threaded=True, host='0.0.0.0', port=5000)
