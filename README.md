@@ -80,6 +80,9 @@ Follow these steps to validate and deploy the Terraform configuration:
 4. Clean up resources when done
 
 ```bash
+# Initialize the Terraform configuration
+terraform init
+
 # Format and validate
 terraform fmt -recursive
 terraform validate
