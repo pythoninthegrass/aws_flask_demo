@@ -1,6 +1,7 @@
 ## IAM Policies and Roles ##
+
 locals {
-  account_id = "${data.aws_caller_identity.current.account_id}"
+  account_id = data.aws_caller_identity.current.account_id
 }
 
 resource "aws_iam_role" "ecs_service_role" {
@@ -54,7 +55,13 @@ resource "aws_iam_role" "ec2_role" {
             "ecs:RegisterContainerInstance",
             "ecs:StartTelemetrySession",
             "ecs:UpdateContainerInstancesState",
-            "ecs:Submit*"
+            "ecs:Submit*",
+            "ecr:GetAuthorizationToken",
+            "ecr:BatchCheckLayerAvailability",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+            "logs:CreateLogStream",
+            "logs:PutLogEvents"
           ]
           Effect   = "Allow"
           Resource = "*"
@@ -80,7 +87,7 @@ resource "aws_iam_role" "ec2_role" {
             "dynamodb:UpdateItem",
             "dynamodb:DeleteItem"
           ]
-          Effect   = "Allow"
+          Effect = "Allow"
           Resource = [
             "arn:aws:logs:us-east-1:${local.account_id}:*/*",
             "arn:aws:dynamodb:us-east-1:${local.account_id}:*/*"
@@ -130,7 +137,7 @@ resource "aws_iam_role" "autoscaling_role" {
             "cloudwatch:DescribeAlarms",
             "cloudwatch:DeleteAlarms"
           ]
-          Effect   = "Allow"
+          Effect = "Allow"
           Resource = [
             "arn:aws:ecs:us-east-1:${local.account_id}:*/*",
             "arn:aws:cloudwatch:us-east-1:${local.account_id}:*/*"
@@ -344,6 +351,13 @@ resource "aws_security_group" "ecs_sg" {
   }
 
   ingress {
+    protocol    = "tcp"
+    from_port   = 5000
+    to_port     = 5000
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
     protocol  = "tcp"
     from_port = 31000
     to_port   = 61000
@@ -366,40 +380,49 @@ resource "aws_cloudwatch_log_group" "ecs_logs" {
 
 # Create an ECS task definition.
 resource "aws_ecs_task_definition" "ecs_task_definition" {
-  family                = "${var.service_name}-ecs-demo-app"
-  container_definitions = <<DEFINITION
-[
-  {
-    "name": "demo-app",
-    "cpu": 10,
-    "image": "${var.ecs_image_url}",
-    "essential": true,
-    "memory": 300,
-    "logConfiguration": {
-      "logDriver": "awslogs",
-      "options": {
-        "awslogs-group": "ecs-logs",
-        "awslogs-region": "us-east-1",
-        "awslogs-stream-prefix": "ecs-demo-app"
+  family       = "${var.service_name}-ecs-demo-app"
+  network_mode = "bridge"
+  container_definitions = jsonencode([
+    {
+      name      = "demo-app"
+      image     = var.ecs_image_url
+      cpu       = 256
+      memory    = 512
+      essential = true
+      portMappings = [
+        {
+          containerPort = 5000
+          hostPort      = 5000
+          protocol      = "tcp"
+        }
+      ]
+      healthCheck = {
+        command     = ["CMD-SHELL", "curl -f http://localhost:5000/ || exit 1"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60
       }
-    },
-    "mountPoints": [
-      {
-        "containerPath": "/usr/local/apache2/htdocs",
-        "sourceVolume": "my-vol"
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = "ecs-logs"
+          "awslogs-region"        = "us-east-1"
+          "awslogs-stream-prefix" = "ecs-demo-app"
+        }
       }
-    ],
-    "portMappings": [
-      {
-        "containerPort": 5000
-      }
-    ]
-  }
-]
-DEFINITION
-  volume {
-    name = "my-vol"
-  }
+      environment = [
+        {
+          name  = "PYTHONUNBUFFERED"
+          value = "1"
+        },
+        {
+          name  = "AWS_DEFAULT_REGION"
+          value = "us-east-1"
+        }
+      ]
+    }
+  ])
 }
 
 # Create the Application Load Balancer.
@@ -423,9 +446,9 @@ resource "aws_lb_target_group" "ecs_rest_api_tg" {
     path                = "/"
     protocol            = "HTTP"
     healthy_threshold   = 2
-    unhealthy_threshold = 2
-    timeout             = 2
-    interval            = 10
+    unhealthy_threshold = 3
+    timeout             = 10
+    interval            = 60
     matcher             = "200"
   }
 }
@@ -459,6 +482,8 @@ resource "aws_ecs_service" "service" {
     container_port   = 5000
     target_group_arn = aws_lb_target_group.ecs_rest_api_tg.arn
   }
+  deployment_minimum_healthy_percent = 50
+  deployment_maximum_percent         = 200
 }
 
 # Create an EC2 instance profile.
@@ -467,24 +492,103 @@ resource "aws_iam_instance_profile" "ec2_instance_profile" {
   role = aws_iam_role.ec2_role.name
 }
 
-# Create an EC2 Launch Configuration for the ECS cluster.
-resource "aws_launch_configuration" "ecs_launch_config" {
-  image_id             = data.aws_ami.latest_ecs_ami.image_id
-  security_groups      = [aws_security_group.ecs_sg.id]
-  instance_type        = var.instance_type
-  iam_instance_profile = aws_iam_instance_profile.ec2_instance_profile.name
-  user_data            = "#!/bin/bash\necho ECS_CLUSTER=ecs_cluster >> /etc/ecs/ecs.config"
+# Create an EC2 Launch Template for the ECS cluster.
+resource "aws_launch_template" "ecs_launch_template" {
+  name_prefix   = "ecs-launch-template-"
+  image_id      = data.aws_ami.latest_ecs_ami.image_id
+  instance_type = var.instance_type
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ec2_instance_profile.name
+  }
+
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    yum update -y
+    yum install -y awslogs jq aws-cli
+
+    # Configure awslogs
+    cat > /etc/awslogs/awslogs.conf << 'EOF_AWSLOGS'
+    [general]
+    state_file = /var/lib/awslogs/agent-state
+
+    [/var/log/dmesg]
+    file = /var/log/dmesg
+    log_group_name = /var/log/dmesg
+    log_stream_name = {instance_id}
+
+    [/var/log/messages]
+    file = /var/log/messages
+    log_group_name = /var/log/messages
+    log_stream_name = {instance_id}
+    datetime_format = %b %d %H:%M:%S
+
+    [/var/log/ecs/ecs-init.log]
+    file = /var/log/ecs/ecs-init.log
+    log_group_name = /var/log/ecs/ecs-init.log
+    log_stream_name = {instance_id}
+    datetime_format = %Y-%m-%d %H:%M:%S
+    EOF_AWSLOGS
+
+    # Set AWS region in awscli config
+    mkdir -p /root/.aws
+    cat > /root/.aws/config << EOF_AWS
+    [default]
+    region = us-east-1
+    EOF_AWS
+
+    # Configure ECS agent
+    echo "ECS_CLUSTER=${aws_ecs_cluster.ecs_cluster.name}" >> /etc/ecs/ecs.config
+    echo "ECS_AVAILABLE_LOGGING_DRIVERS=[\"json-file\",\"awslogs\"]" >> /etc/ecs/ecs.config
+    echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
+    echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
+
+    # Start services
+    systemctl enable awslogsd.service
+    systemctl start awslogsd.service
+    systemctl enable --now ecs.service
+  EOF
+  )
+
+  network_interfaces {
+    associate_public_ip_address = false
+    security_groups             = [aws_security_group.ecs_sg.id]
+  }
+
+  monitoring {
+    enabled = true
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "ECS Instance - ${aws_ecs_cluster.ecs_cluster.name}"
+    }
+  }
 }
 
 # Create the ECS autoscaling group.
 resource "aws_autoscaling_group" "ecs_asg" {
-  name                 = "ecs-asg"
-  vpc_zone_identifier  = [aws_subnet.private_1.id, aws_subnet.private_2.id]
-  launch_configuration = aws_launch_configuration.ecs_launch_config.name
+  name                = "ecs-asg"
+  vpc_zone_identifier = [aws_subnet.private_1.id, aws_subnet.private_2.id]
+  launch_template {
+    id      = aws_launch_template.ecs_launch_template.id
+    version = "$Latest"
+  }
 
-  desired_capacity = var.desired_capacity
-  min_size         = 1
-  max_size         = var.maximum_capacity
+  desired_capacity          = var.desired_capacity
+  min_size                  = 1
+  max_size                  = var.maximum_capacity
+  depends_on                = [aws_security_group.ecs_sg]
+  health_check_type         = "EC2"
+  health_check_grace_period = 300
+  force_delete              = true
+
+  tag {
+    key                 = "AmazonECSManaged"
+    value               = true
+    propagate_at_launch = true
+  }
 }
 
 # Create an autoscaling policy.
