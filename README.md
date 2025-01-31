@@ -6,7 +6,22 @@
 > 
 > We will containerize our Flask application and deploy it to Elastic Container Service (ECS). In addition to explaining how to configure an API, we will cover how to automate the deployment of AWS Services using Terraform. We will also walk through some basic testing of the API we create using SOAP API. 
 
-# AWS Services Used
+**Table of Contents**
+* [aws\_flask\_demo](#aws_flask_demo)
+  * [AWS Services Used](#aws-services-used)
+  * [How To Use?](#how-to-use)
+    * [Terraform ECS Cluster with Autoscaling Group](#terraform-ecs-cluster-with-autoscaling-group)
+    * [Dependencies](#dependencies)
+    * [Summary](#summary)
+  * [Index](#index)
+    * [Provider Dependencies](#provider-dependencies)
+    * [Usage](#usage)
+      * [Pre-Deployment Testing and Validation](#pre-deployment-testing-and-validation)
+      * [Variables](#variables)
+  * [TODO](#todo)
+  * [License](#license)
+
+## AWS Services Used
 
 Let’s review the AWS services we are deploying with this project.
 
@@ -24,27 +39,27 @@ Let’s review the AWS services we are deploying with this project.
 
 **CloudWatch** - [Amazon CloudWatch](https://aws.amazon.com/cloudwatch/) is a monitoring and observability service built for DevOps engineers, developers, site reliability engineers (SREs), and IT managers to provide data and actionable insights to monitor your applications, respond to system-wide performance changes, optimize resource utilization, and get a unified view of operational health.  Scaling rulesets provisioned by Terraform are referenced for autoscaling purposes.  Alert metrics provide threshold based triggers to scale the autoscaling groups as needed to meet workload demands. 
 
-# How To Use?
+## How To Use?
 
 To deploy this project, follow the step by step instructions found here.
 
-## Terraform ECS Cluster with Autoscaling Group
+### Terraform ECS Cluster with Autoscaling Group
 
 This Terraform template is designed to define a set of specific modules that will perform the following tasks:
 
-- Define the desired state configuration for security, resources, and configurations for delivering defined elements using Infrastructure as Code concepts
-- Separate security configurations, cluster configurations, and bootstrapping processes into source control managed definitions making them reusable, defined, and flexible
-- Provide a functional process whereby an ECS cluster with these defined dependencies can be effectively leveraged and quickly delivered
+* Define the desired state configuration for security, resources, and configurations for delivering defined elements using Infrastructure as Code concepts
+* Separate security configurations, cluster configurations, and bootstrapping processes into source control managed definitions making them reusable, defined, and flexible
+* Provide a functional process whereby an ECS cluster with these defined dependencies can be effectively leveraged and quickly delivered
 
-## Dependencies
+### Dependencies
 
 This module has dependencies or requirements in order to successfully deliver the desired state.  These dependencies include the following:
 
-- An AWS account is required
-- An execution role or IAM key is required for authentication with the AWS account
-- An Elastic Container Repository containing the reference image
+* An AWS account is required
+* An execution role or IAM key is required for authentication with the AWS account
+* An Elastic Container Repository containing the reference image
 
-## Summary
+### Summary
 
 This module is designed to provide a comprehensive deployment solution for ECS including the following component configurations:
 
@@ -59,18 +74,18 @@ This module is designed to provide a comprehensive deployment solution for ECS i
 
 **Please read the rest of this document prior to leveraging this Terraform template for platform delivery.**
 
-# Index
+## Index
 
 [Usage](#usage)  
 [Variables](#variables)  
 
-## Provider Dependencies
+### Provider Dependencies
 
 This Terraform code was tested on Terraform 0.14.7 using AWS provider 3.30.0.    
 
-## Usage
+### Usage
 
-### Pre-Deployment Testing and Validation
+#### Pre-Deployment Testing and Validation
 
 Follow these steps to validate and deploy the Terraform configuration:
 
@@ -119,6 +134,17 @@ terraform destroy
 | ecs_image_url      | The desired ECR image url                                                                                | string  | -                      |
 | dynamo_table_name  | The desired DynamoDB table name                                                                          | string  | musicTable             |
 
-### License
+## TODO
+
+* Remove `fastapi`
+  * Rebuild docker image and upload to ecr
+* Use `httpie` instead of soapui (java blegh)
+* Update aws provider and refactor `main.tf` code
+* CI
+  * Makefile
+  * Taskfile
+  * GitHub Actions
+
+## License
 
 This library is licensed under the MIT-0 License. See the [LICENSE](LICENSE) file.
